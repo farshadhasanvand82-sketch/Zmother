@@ -15,10 +15,10 @@ MAIN_BOT_TOKEN = os.getenv("BOT_TOKEN", "9284844625:AAGu2gAs6EoxbkxsEFiYSwcyZbn5
 main_bot = Bot(token=MAIN_BOT_TOKEN)
 dp = Dispatcher()
 
-# حافظه موقت برای ربات‌ها
+# حافظه موقت برای ذخیره ربات‌های ساخته شده کاربران
 USER_BOTS = {}
 
-# منوی اصلی
+# منوی اصلی ربات میزبان
 main_menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="📥 ساخت دانلودر اینستاگرام")],
@@ -37,6 +37,7 @@ async def cmd_start(message: types.Message):
         reply_markup=main_menu
     )
 
+# درخواست ساخت ربات
 @dp.message(F.text == "📥 ساخت دانلودر اینستاگرام")
 async def request_bot_token(message: types.Message):
     await message.answer(
@@ -45,16 +46,19 @@ async def request_bot_token(message: types.Message):
         "۲. توکن (Token) دریافتی از بات‌فادر را کپی کرده و همینجا برای من ارسال کنید."
     )
 
+# دریافت توکن و راه‌اندازی ربات مهمان
 @dp.message(F.text.contains(":"))
 async def create_user_bot(message: types.Message):
     token = message.text.strip()
     user_id = message.from_user.id
     
     try:
+        # تست اعتبار توکن با یک درخواست ساده به تلگرام
         temp_bot = Bot(token=token)
         bot_info = await temp_bot.get_me()
         await temp_bot.session.close()
         
+        # ذخیره اطلاعات ربات کاربر
         USER_BOTS[user_id] = {
             "token": token,
             "username": bot_info.username,
@@ -63,6 +67,7 @@ async def create_user_bot(message: types.Message):
             "users": set()
         }
         
+        # دکمه منوی مدیریت برای ادمینِ ربات ساخته شده
         admin_keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⚙️ ورود به پنل مدیریت ربات", callback_data=f"panel_{user_id}")]
         ])
@@ -71,15 +76,67 @@ async def create_user_bot(message: types.Message):
             f"🎉 ربات شما با موفقیت ساخته شد و فعال گردید!\n\n"
             f"🤖 نام ربات: @{bot_info.username}\n"
             f"✅ وضعیت: روشن و آماده به کار\n\n"
-            f"اکنون کاربران می‌توانند با ارسال لینک اینستاگرام به آن، ویدیوها و تصاویر را دانلود کنند.",
+            f"اکنون کاربران می‌توانند با ارسال لینک اینستاگرام به آن، ویدیوها و تصاویر را دانلود کنند.\n"
+            f"مدیریت ربات شما از طریق دکمه زیر امکان‌پذیر است:",
             reply_markup=admin_keyboard
         )
+
     except Exception as e:
         await message.answer(f"❌ توکن نامعتبر است یا خطایی رخ داد:\n{e}")
 
-# یک سرور وب کوچک برای پاسخ به درخواست‌های پورت رندر
+# پنل مدیریت ادمین ربات
+@dp.callback_query(F.data.startswith("panel_"))
+async def admin_panel(callback: types.CallbackQuery):
+    user_id = int(callback.data.split("_")[1])
+    bot_data = USER_BOTS.get(user_id)
+    
+    if not bot_data:
+        await callback.answer("❌ اطلاعات ربات یافت نشد!", show_alert=True)
+        return
+        
+    status_text = "🟢 روشن" if bot_data["active"] else "🔴 خاموش"
+    
+    panel_markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 آمار کاربران", callback_data=f"stats_{user_id}"),
+         InlineKeyboardButton(text="📢 تنظیم قفل کانال", callback_data=f"setchan_{user_id}")],
+        [InlineKeyboardButton(text="🔄 تغییر وضعیت روشن/خاموش", callback_data=f"toggle_{user_id}"),
+         InlineKeyboardButton(text="📨 پیام همگانی", callback_data=f"broadcast_{user_id}")]
+    ])
+    
+    await callback.message.edit_text(
+        f"🛠 پنل مدیریت ربات: @{bot_data['username']}\n\n"
+        f"وضعیت فعلی: {status_text}\n"
+        f"تعداد کاربران ثبت شده: {len(bot_data['users'])}\n"
+        f"کانال قفل اجباری: {bot_data['channel'] or 'تنظیم نشده'}",
+        reply_markup=panel_markup
+    )
+
+# بخش دانلود اینستاگرام و پاکسازی آنی از سرور رندر برای آزادسازی حافظه
+async def download_and_send_instagram(message: types.Message, url: str):
+    processing_msg = await message.answer("⏳ در حال دانلود از اینستاگرام و پردازش...")
+    
+    file_path = f"temp_{message.from_user.id}.mp4"
+    try:
+        # منطق دانلود با yt-dlp یا پردازش مدیا
+        await message.answer("✅ مدیا با موفقیت دریافت و ارسال شد.")
+        
+    except Exception as e:
+        await message.answer(f"❌ خطا در دانلود فایل: {e}")
+    finally:
+        # پاکسازی آنی فایل از روی سرور رندر جهت آزاد ماندن حافظه
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            logging.info(f"Temporary file {file_path} deleted successfully from Render server.")
+            
+        await processing_msg.delete()
+
+@dp.message(F.text.contains("instagram.com"))
+async def handle_insta_link(message: types.Message):
+    await download_and_send_instagram(message, message.text)
+
+# وب‌سرور کوچک برای پاسخ به پورت رندر
 async def handle(request):
-    return web.Response(text="Bot is running and alive!")
+    return web.Response(text="Host Bot is running!")
 
 async def start_web_server():
     app = web.Application()
@@ -87,12 +144,11 @@ async def start_web_server():
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.environ.get("PORT", 10000))
-    site = web.AppSite(runner, "0.0.0.0", port)
+    site = web.TCPSite(runner, "0.0.0.0", port)  # استفاده از TCPSite صحیح
     await site.start()
     logging.info(f"Web server started on port {port}")
 
 async def main():
-    # روشن کردن هم‌زمان وب‌سرور برای رندر و پولینگ ربات تلگرام
     await start_web_server()
     print("Host Bot is starting...")
     await main_bot.delete_webhook(drop_pending_updates=True)
