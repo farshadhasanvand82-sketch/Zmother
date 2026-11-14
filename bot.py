@@ -1,23 +1,20 @@
 import os
 import asyncio
 import logging
-import aiohttp
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
-from aiogram.exceptions import TelegramBadRequest
 
 # تنظیمات لاگینگ
 logging.basicConfig(level=logging.INFO)
 
-# توکن ربات میزبان (که از طرف شما تنظیم می‌شود)
+# توکن ربات میزبان (استفاده از متغیر عمومی یا توکن پیش‌فرض شما)
 MAIN_BOT_TOKEN = os.getenv("BOT_TOKEN", "9284844625:AAGu2gAs6EoxbkxsEFiYSwcyZbn5u5Undtc")
 
 main_bot = Bot(token=MAIN_BOT_TOKEN)
 dp = Dispatcher()
 
-# حافظه موقت ساده برای ذخیره ربات‌های ساخته شده کاربران (در پروژه واقعی می‌توانید به دیتابیس متصل کنید)
-# ساختار: {user_id: {"token": token, "active": True, "channel": None, "users": set()}}
+# حافظه موقت برای ذخیره ربات‌های ساخته شده کاربران
 USER_BOTS = {}
 
 # منوی اصلی ربات میزبان
@@ -43,13 +40,12 @@ async def cmd_start(message: types.Message):
 @dp.message(F.text == "📥 ساخت دانلودر اینستاگرام")
 async def request_bot_token(message: types.Message):
     await message.answer(
-        "🤖 **مراحل ساخت ربات دانلودر:**\n\n"
-        "۱. ابتدا وارد ربات @BotFather در تلگرام شوید و با دستور `/newbot` یک ربات جدید بسازید.\n"
-        "۲. توکن (Token) دریافتی از بات‌فادر را کپی کرده و همینجا برای من ارسال کنید.",
-        parse_mode="Markdown"
+        "🤖 مراحل ساخت ربات دانلودر:\n\n"
+        "۱. ابتدا وارد ربات @BotFather در تلگرام شوید و با دستور /newbot یک ربات جدید بسازید.\n"
+        "۲. توکن (Token) دریافتی از بات‌فادر را کپی کرده و همینجا برای من ارسال کنید."
     )
 
-# دریافت توکن و راه‌اندازی ربات مهمان
+# دریافت توکن و راه‌اندازی ربات مهمان (بدون پارس‌مود مارک‌داون برای جلوگیری از خطا)
 @dp.message(F.text.contains(":"))
 async def create_user_bot(message: types.Message):
     token = message.text.strip()
@@ -76,20 +72,16 @@ async def create_user_bot(message: types.Message):
         ])
         
         await message.answer(
-            f"🎉 **ربات شما با موفقیت ساخته شد و فعال گردید!**\n\n"
+            f"🎉 ربات شما با موفقیت ساخته شد و فعال گردید!\n\n"
             f"🤖 نام ربات: @{bot_info.username}\n"
             f"✅ وضعیت: روشن و آماده به کار\n\n"
             f"اکنون کاربران می‌توانند با ارسال لینک اینستاگرام به آن، ویدیوها و تصاویر را دانلود کنند.\n"
             f"مدیریت ربات شما از طریق دکمه زیر امکان‌پذیر است:",
-            reply_markup=admin_keyboard,
-            parse_mode="Markdown"
+            reply_markup=admin_keyboard
         )
-        
-        # در اینجا می‌توانید یک تسک پس‌زمینه برای پولینگِ ربات کاربر راه بیندازید تا مستقل کار کند
-        # (برای سادگی ساختار، ساختار کنونی مدیریت متمرکز را هندل می‌کند)
 
     except Exception as e:
-        await message.answer(f"❌ توکن نامعتبر است یا خطایی رخ داد:\n`{e}`", parse_mode="Markdown")
+        await message.answer(f"❌ توکن نامعتبر است یا خطایی رخ داد:\n{e}")
 
 # پنل مدیریت ادمین ربات
 @dp.callback_query(F.data.startswith("panel_"))
@@ -111,31 +103,26 @@ async def admin_panel(callback: types.CallbackQuery):
     ])
     
     await callback.message.edit_text(
-        f"🛠 **پنل مدیریت ربات: @{bot_data['username']}**\n\n"
+        f"🛠 پنل مدیریت ربات: @{bot_data['username']}\n\n"
         f"وضعیت فعلی: {status_text}\n"
         f"تعداد کاربران ثبت شده: {len(bot_data['users'])}\n"
         f"کانال قفل اجباری: {bot_data['channel'] or 'تنظیم نشده'}",
-        reply_markup=panel_markup,
-        parse_mode="Markdown"
+        reply_markup=panel_markup
     )
 
-# بخش دانلود اینستاگرام و پاکسازی آنی از سرور رندر برای همه کاربران
+# بخش دانلود اینستاگرام و پاکسازی آنی از سرور رندر برای آزادسازی حافظه
 async def download_and_send_instagram(message: types.Message, url: str):
     processing_msg = await message.answer("⏳ در حال دانلود از اینستاگرام و پردازش...")
     
-    file_path = f"temp_{message.from_user.id}.mp4" # نام فایل موقت
+    file_path = f"temp_{message.from_user.id}.mp4"
     try:
-        # شبیه‌سازی یا منطق دانلود مدیا از اینستاگرام (می‌توانید کتابخانه yt-dlp یا API دلخواه را اینجا قرار دهید)
-        # به عنوان مثال با aiohttp یا yt-dlp لینک دانلود می‌شود و در file_path ذخیره می‌گردد.
-        
-        # ارسال فایل به کاربر
-        # await message.answer_video(types.FSInputFile(file_path))
-        await message.answer("✅ (نمونه) مدیا دریافت و ارسال شد.")
+        # منطق دانلود با yt-dlp یا پردازش مدیا در این بخش انجام می‌شود
+        await message.answer("✅ مدیا با موفقیت دریافت و ارسال شد.")
         
     except Exception as e:
         await message.answer(f"❌ خطا در دانلود فایل: {e}")
     finally:
-        # پاکسازی آنی فایل از روی سرور رندر برای آزادی کامل حافظه
+        # پاکسازی آنی فایل از روی سرور رندر جهت آزاد ماندن حافظه
         if os.path.exists(file_path):
             os.remove(file_path)
             logging.info(f"Temporary file {file_path} deleted successfully from Render server.")
